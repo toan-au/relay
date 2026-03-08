@@ -16,6 +16,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  adminer:
+    image: adminer
+    container_name: hotpotato-adminer
+    ports:
+      - "8080:8080"
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z

@@ -6,6 +6,7 @@ use axum::{
 use sqlx::PgPool;
 
 mod routes;
+mod storage;
 
 // 1 gb max file upload
 const MAX_VIDEO_UPLOAD_SIZE: usize = 1024 * 1024 * 1024;
@@ -29,11 +30,28 @@ async fn main() {
         .await
         .expect("Unable to connect to DB");
 
-    let config = aws_config::load_from_env().await;
-    let s3 = aws_sdk_s3::Client::new(&config);
+    let s3 = storage::create_s3_client().await;
     let bucket = "videos".to_string();
 
     let app_state = AppState { db, s3, bucket };
+
+    match app_state
+        .s3
+        .create_bucket()
+        .bucket(&app_state.bucket)
+        .send()
+        .await
+    {
+        Ok(_) => println!("Connected to MinIO, bucket created"),
+        Err(e) => println!("Bucket error (may already exist): {}", e),
+    }
+
+    // Run migrations
+    sqlx::migrate!("./migrations")
+        .run(&app_state.db)
+        .await
+        .expect("Failed to run migrations");
+    print!("Migrations successfully applied");
 
     // Setup routes
     let app: Router = Router::new()

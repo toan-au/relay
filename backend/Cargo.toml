@@ -12,7 +12,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "macros", "runtime-tokio", "uuid", "chrono"] }
 
 # s3/minio
-aws-sdk-s3 = "1.125.0"
+aws-sdk-s3 = { version = "1.125.0", features = ["behavior-version-latest"] }
 aws-config = { version = "1.8.15", features = ["behavior-version-latest"] }
 
 # utils

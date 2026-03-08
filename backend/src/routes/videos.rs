@@ -1,9 +1,11 @@
 use axum::{
     body::Bytes,
-    extract::Multipart,
+    extract::{Multipart, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+
+use crate::AppState;
 
 struct File {
     file_name: String,
@@ -11,7 +13,10 @@ struct File {
     bytes: Bytes,
 }
 
-pub async fn upload_video(mut multipart: Multipart) -> Result<Response, Response> {
+pub async fn upload_video(
+    State(_state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Response, Response> {
     while let Some(field) = multipart
         .next_field()
         .await
