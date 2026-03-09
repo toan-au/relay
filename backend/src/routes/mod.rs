@@ -23,7 +23,7 @@ pub fn router(state: AppState) -> Router {
             get(videos::get_playlist),
         )
         .route(
-            "/api/videos/{share_token}/segment/{segment}",
+            "/api/videos/{share_token}/{segment}",
             get(videos::get_segment),
         )
         .with_state(state)
