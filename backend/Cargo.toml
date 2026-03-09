@@ -1,7 +1,7 @@
 [package]
 name = "hot-potato-backend"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 # Web
@@ -23,3 +23,5 @@ dotenvy = "0.15.7"
 chrono = { version = "0.4.44", features = ["serde"] }
 tempfile = "3.26.0"
 anyhow = "1.0.102"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

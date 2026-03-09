@@ -4,6 +4,7 @@ use axum::{
     Router,
 };
 use sqlx::PgPool;
+use tracing::{info, warn};
 
 mod routes;
 mod storage;
@@ -21,6 +22,8 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     // Load .env in dev
     #[cfg(debug_assertions)]
     dotenvy::dotenv().ok();
@@ -43,8 +46,8 @@ async fn main() {
         .send()
         .await
     {
-        Ok(_) => println!("Connected to MinIO, bucket created"),
-        Err(e) => println!("Bucket error (may already exist): {}", e),
+        Ok(_) => info!("Connected to MinIO, bucket created"),
+        Err(e) => warn!("Bucket error (may already exist): {}", e),
     }
 
     // Run migrations

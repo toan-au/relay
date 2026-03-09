@@ -5,11 +5,13 @@ use axum::{
 };
 use tokio::io::AsyncWriteExt;
 
+use tracing::{debug, error, info};
+
 use crate::transcoder;
 use crate::AppState;
 
 fn log_error(e: impl std::fmt::Display) -> Response {
-    eprintln!("error: {}", e);
+    error!("internal error: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
@@ -25,7 +27,7 @@ fn s3_error(e: impl std::fmt::Display) -> Response {
     if msg.contains("NoSuchKey") {
         StatusCode::NOT_FOUND.into_response()
     } else {
-        eprintln!("s3 error: {:?}", msg);
+        error!("s3 error: {}", msg);
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
 }
@@ -50,7 +52,7 @@ pub async fn upload_video(
             _ => "mp4",
         };
 
-        println!("{:?} {:?}", field.file_name(), field.content_type());
+        debug!("upload field: {:?} {:?}", field.file_name(), field.content_type());
         let tmp_dir = tempfile::Builder::new()
             .prefix("hotpotato-")
             .tempdir_in(".")
@@ -68,10 +70,9 @@ pub async fn upload_video(
         let output_dir = tmp_dir.path().join("hls");
 
         let input_str = input_path.to_str().unwrap();
-        println!("passing to ffmpeg: {}", input_str);
-
-        println!("input file exists: {}", input_path.exists());
-        println!(
+        debug!("passing to ffmpeg: {}", input_str);
+        debug!("input file exists: {}", input_path.exists());
+        debug!(
             "input file size: {:?}",
             std::fs::metadata(&input_path).map(|m| m.len())
         );
@@ -106,7 +107,7 @@ pub async fn upload_video(
                 .await
                 .map_err(log_error)?;
 
-            println!("uploaded: {}", key);
+            info!("uploaded: {}", key);
         }
 
         let share_token = &video_id[..8];
@@ -121,7 +122,7 @@ pub async fn upload_video(
         .await
         .map_err(log_error)?;
 
-        println!("video inserted: {}", share_token);
+        info!("video inserted: {}", share_token);
         return Ok(share_token.to_string().into_response());
     }
 
@@ -163,7 +164,7 @@ pub async fn get_playlist(
             .map_err(sqlx_error)?;
 
     let key = format!("{}/playlist.m3u8", video.id);
-    println!("fetching key: {}", key);
+    debug!("fetching key: {}", key);
 
     let object = state
         .s3
