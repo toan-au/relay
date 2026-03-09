@@ -2,14 +2,12 @@ use axum::{
     extract::{Multipart, Path, State},
     response::{IntoResponse, Response},
 };
-use tokio::io::AsyncWriteExt;
 
 use tracing::{debug, info};
 
 use crate::errors::AppError;
 use crate::models::video::VideoRow;
 use crate::state::AppState;
-use crate::transcoder;
 
 pub async fn upload_video(
     State(state): State<AppState>,
@@ -20,7 +18,6 @@ pub async fn upload_video(
             continue;
         }
 
-        // Find the extension
         let content_type = field.content_type().unwrap_or("video/mp4").to_owned();
         let extension = match content_type.as_str() {
             "video/mp4" => "mp4",
@@ -36,74 +33,49 @@ pub async fn upload_video(
             field.file_name(),
             field.content_type()
         );
-        let tmp_dir = tempfile::Builder::new()
-            .prefix("relay-")
-            .tempdir_in(".")
-            .map_err(AppError::internal)?;
-        let input_path = tmp_dir.path().join(format!("input.{}", extension));
 
-        let mut tmp_file = tokio::fs::File::create(&input_path)
-            .await
-            .map_err(AppError::internal)?;
-
+        let mut buffer: Vec<u8> = Vec::new();
         while let Some(chunk) = field.chunk().await.map_err(AppError::internal)? {
-            tmp_file
-                .write_all(&chunk)
-                .await
-                .map_err(AppError::internal)?;
+            buffer.extend_from_slice(&chunk);
         }
 
-        let output_dir = tmp_dir.path().join("hls");
-
-        let input_str = input_path.to_str().unwrap();
-        debug!("passing to ffmpeg: {}", input_str);
-        debug!("input file exists: {}", input_path.exists());
-        debug!(
-            "input file size: {:?}",
-            std::fs::metadata(&input_path).map(|m| m.len())
-        );
-
-        tmp_file.flush().await.map_err(AppError::internal)?;
-        drop(tmp_file); // close the file before FFmpeg reads it
-
-        tokio::fs::create_dir(&output_dir)
-            .await
-            .map_err(AppError::internal)?;
-
-        transcoder::transcode(input_path.to_str().unwrap(), output_dir.to_str().unwrap()).await?;
-
-        // Generate video id and upload segments to bucket
         let video_id = uuid::Uuid::new_v4();
-        let mut entries = tokio::fs::read_dir(&output_dir)
+        let share_token = &uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string();
+
+        let s3_key = format!("raw/{}/input.{}", share_token, extension);
+
+        state
+            .s3
+            .put_object()
+            .bucket(&state.bucket)
+            .key(&s3_key)
+            .body(buffer.into())
+            .send()
             .await
-            .map_err(AppError::internal)?;
+            .map_err(AppError::from_s3)?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(AppError::internal)? {
-            let file_name = entry.file_name();
-            let file_name = file_name.to_str().unwrap();
-            let bytes = tokio::fs::read(entry.path())
-                .await
-                .map_err(AppError::internal)?;
-            let key = format!("{}/{}", video_id, file_name);
-            state
-                .s3
-                .put_object()
-                .bucket(&state.bucket)
-                .key(&key)
-                .body(bytes.into())
-                .send()
-                .await
-                .map_err(AppError::from_s3)?;
+        info!("uploaded raw video to S3: {}", s3_key);
 
-            info!("uploaded: {}", key);
-        }
-
-        let share_token = &video_id.to_string()[..8];
-
-        // Persist to DB
         VideoRow::insert(&state.db, video_id, share_token).await?;
 
         info!("video inserted: {}", share_token);
+
+        let message = serde_json::json!({
+            "share_token": share_token,
+            "s3_key": s3_key,
+        });
+
+        state
+            .sqs
+            .send_message()
+            .queue_url(&state.queue_url)
+            .message_body(message.to_string())
+            .send()
+            .await
+            .map_err(AppError::internal)?;
+
+        info!("SQS job enqueued for: {}", share_token);
+
         return Ok(share_token.to_string().into_response());
     }
 
@@ -126,9 +98,9 @@ pub async fn get_playlist(
     State(state): State<AppState>,
     Path(share_token): Path<String>,
 ) -> Result<Response, AppError> {
-    let video = VideoRow::fetch_by_token(&state.db, &share_token).await?;
+    VideoRow::fetch_by_token(&state.db, &share_token).await?;
 
-    let key = format!("{}/playlist.m3u8", video.id);
+    let key = format!("{}/playlist.m3u8", share_token);
     debug!("fetching key: {}", key);
 
     let object = state
@@ -161,9 +133,9 @@ pub async fn get_segment(
     State(state): State<AppState>,
     Path((share_token, segment)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    let video = VideoRow::fetch_by_token(&state.db, &share_token).await?;
+    VideoRow::fetch_by_token(&state.db, &share_token).await?;
 
-    let key = format!("{}/{}", video.id, segment);
+    let key = format!("{}/{}", share_token, segment);
 
     let object = state
         .s3
