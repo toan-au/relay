@@ -31,7 +31,11 @@ pub async fn upload_video(
             _ => "mp4",
         };
 
-        debug!("upload field: {:?} {:?}", field.file_name(), field.content_type());
+        debug!(
+            "upload field: {:?} {:?}",
+            field.file_name(),
+            field.content_type()
+        );
         let tmp_dir = tempfile::Builder::new()
             .prefix("hotpotato-")
             .tempdir_in(".")
@@ -43,7 +47,10 @@ pub async fn upload_video(
             .map_err(AppError::internal)?;
 
         while let Some(chunk) = field.chunk().await.map_err(AppError::internal)? {
-            tmp_file.write_all(&chunk).await.map_err(AppError::internal)?;
+            tmp_file
+                .write_all(&chunk)
+                .await
+                .map_err(AppError::internal)?;
         }
 
         let output_dir = tmp_dir.path().join("hls");
@@ -63,17 +70,20 @@ pub async fn upload_video(
             .await
             .map_err(AppError::internal)?;
 
-        transcoder::transcode(input_path.to_str().unwrap(), output_dir.to_str().unwrap())
-            .await?;
+        transcoder::transcode(input_path.to_str().unwrap(), output_dir.to_str().unwrap()).await?;
 
         // Generate video id and upload segments to bucket
-        let video_id = uuid::Uuid::new_v4().to_string();
-        let mut entries = tokio::fs::read_dir(&output_dir).await.map_err(AppError::internal)?;
+        let video_id = uuid::Uuid::new_v4();
+        let mut entries = tokio::fs::read_dir(&output_dir)
+            .await
+            .map_err(AppError::internal)?;
 
         while let Some(entry) = entries.next_entry().await.map_err(AppError::internal)? {
             let file_name = entry.file_name();
             let file_name = file_name.to_str().unwrap();
-            let bytes = tokio::fs::read(entry.path()).await.map_err(AppError::internal)?;
+            let bytes = tokio::fs::read(entry.path())
+                .await
+                .map_err(AppError::internal)?;
             let key = format!("{}/{}", video_id, file_name);
             state
                 .s3
@@ -88,16 +98,10 @@ pub async fn upload_video(
             info!("uploaded: {}", key);
         }
 
-        let share_token = &video_id[..8];
+        let share_token = &video_id.to_string()[..8];
 
-        sqlx::query!(
-            "INSERT INTO videos (id, share_token, status) VALUES ($1, $2, $3)",
-            uuid::Uuid::parse_str(&video_id).unwrap(),
-            share_token,
-            "ready"
-        )
-        .execute(&state.db)
-        .await?;
+        // Persist to DB
+        VideoRow::insert(&state.db, video_id, share_token).await?;
 
         info!("video inserted: {}", share_token);
         return Ok(share_token.to_string().into_response());
@@ -110,11 +114,7 @@ pub async fn get_video(
     State(state): State<AppState>,
     Path(share_token): Path<String>,
 ) -> Result<Response, AppError> {
-    let video =
-        sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
-            .bind(share_token)
-            .fetch_one(&state.db)
-            .await?;
+    let video = VideoRow::fetch_by_token(&state.db, &share_token).await?;
 
     Ok(axum::Json(serde_json::json!({
         "status": video.status
@@ -126,11 +126,7 @@ pub async fn get_playlist(
     State(state): State<AppState>,
     Path(share_token): Path<String>,
 ) -> Result<Response, AppError> {
-    let video =
-        sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
-            .bind(share_token)
-            .fetch_one(&state.db)
-            .await?;
+    let video = VideoRow::fetch_by_token(&state.db, &share_token).await?;
 
     let key = format!("{}/playlist.m3u8", video.id);
     debug!("fetching key: {}", key);
@@ -144,7 +140,12 @@ pub async fn get_playlist(
         .await
         .map_err(AppError::from_s3)?;
 
-    let bytes = object.body.collect().await.map_err(AppError::internal)?.into_bytes();
+    let bytes = object
+        .body
+        .collect()
+        .await
+        .map_err(AppError::internal)?
+        .into_bytes();
 
     Ok((
         [(
@@ -160,11 +161,7 @@ pub async fn get_segment(
     State(state): State<AppState>,
     Path((share_token, segment)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    let video =
-        sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
-            .bind(&share_token)
-            .fetch_one(&state.db)
-            .await?;
+    let video = VideoRow::fetch_by_token(&state.db, &share_token).await?;
 
     let key = format!("{}/{}", video.id, segment);
 
@@ -177,7 +174,12 @@ pub async fn get_segment(
         .await
         .map_err(AppError::from_s3)?;
 
-    let bytes = object.body.collect().await.map_err(AppError::internal)?.into_bytes();
+    let bytes = object
+        .body
+        .collect()
+        .await
+        .map_err(AppError::internal)?
+        .into_bytes();
 
     Ok(([(axum::http::header::CONTENT_TYPE, "video/mp2t")], bytes).into_response())
 }

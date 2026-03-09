@@ -1,5 +1,5 @@
 use sqlx::PgPool;
-use tracing::{info, warn};
+use tracing::info;
 
 mod errors;
 mod models;
@@ -12,13 +12,13 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() {
-    // Setup logging
     tracing_subscriber::fmt::init();
 
     // Load .env in dev
     #[cfg(debug_assertions)]
     dotenvy::dotenv().ok();
 
+    // Setup application state
     let database_url = std::env::var("DATABASE_URL").expect("Unable to find DB endpoint");
     let db = PgPool::connect(&database_url)
         .await
@@ -29,15 +29,25 @@ async fn main() {
 
     let app_state = AppState { db, s3, bucket };
 
-    match app_state
+    let bucket_exists = app_state
         .s3
-        .create_bucket()
+        .head_bucket()
         .bucket(&app_state.bucket)
         .send()
         .await
-    {
-        Ok(_) => info!("Connected to MinIO, bucket created"),
-        Err(e) => warn!("Bucket error (may already exist): {}", e),
+        .is_ok();
+
+    if bucket_exists {
+        info!("Connected to MinIO, bucket already exists");
+    } else {
+        app_state
+            .s3
+            .create_bucket()
+            .bucket(&app_state.bucket)
+            .send()
+            .await
+            .expect("Failed to create bucket");
+        info!("Connected to MinIO, bucket created");
     }
 
     sqlx::migrate!("./migrations")
