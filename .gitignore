@@ -11,6 +11,11 @@
 backend/target/
 
 # ========================
+# Worker
+# ========================
+worker/target/
+
+# ========================
 # Frontend
 # ========================
 frontend/node_modules/
