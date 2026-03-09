@@ -1,42 +1,21 @@
 use axum::{
     extract::{Multipart, Path, State},
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use tokio::io::AsyncWriteExt;
 
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
+use crate::errors::AppError;
+use crate::models::video::VideoRow;
+use crate::state::AppState;
 use crate::transcoder;
-use crate::AppState;
-
-fn log_error(e: impl std::fmt::Display) -> Response {
-    error!("internal error: {}", e);
-    StatusCode::INTERNAL_SERVER_ERROR.into_response()
-}
-
-fn sqlx_error(e: sqlx::Error) -> Response {
-    match e {
-        sqlx::Error::RowNotFound => StatusCode::NOT_FOUND.into_response(),
-        _ => log_error(e),
-    }
-}
-
-fn s3_error(e: impl std::fmt::Display) -> Response {
-    let msg = e.to_string();
-    if msg.contains("NoSuchKey") {
-        StatusCode::NOT_FOUND.into_response()
-    } else {
-        error!("s3 error: {}", msg);
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    }
-}
 
 pub async fn upload_video(
     State(state): State<AppState>,
     mut multipart: Multipart,
-) -> Result<Response, Response> {
-    while let Some(mut field) = multipart.next_field().await.map_err(log_error)? {
+) -> Result<Response, AppError> {
+    while let Some(mut field) = multipart.next_field().await.map_err(AppError::internal)? {
         if field.name() != Some("video") {
             continue;
         }
@@ -56,15 +35,15 @@ pub async fn upload_video(
         let tmp_dir = tempfile::Builder::new()
             .prefix("hotpotato-")
             .tempdir_in(".")
-            .map_err(log_error)?;
+            .map_err(AppError::internal)?;
         let input_path = tmp_dir.path().join(format!("input.{}", extension));
 
         let mut tmp_file = tokio::fs::File::create(&input_path)
             .await
-            .map_err(log_error)?;
+            .map_err(AppError::internal)?;
 
-        while let Some(chunk) = field.chunk().await.map_err(log_error)? {
-            tmp_file.write_all(&chunk).await.map_err(log_error)?;
+        while let Some(chunk) = field.chunk().await.map_err(AppError::internal)? {
+            tmp_file.write_all(&chunk).await.map_err(AppError::internal)?;
         }
 
         let output_dir = tmp_dir.path().join("hls");
@@ -77,25 +56,24 @@ pub async fn upload_video(
             std::fs::metadata(&input_path).map(|m| m.len())
         );
 
-        tmp_file.flush().await.map_err(log_error)?;
+        tmp_file.flush().await.map_err(AppError::internal)?;
         drop(tmp_file); // close the file before FFmpeg reads it
 
         tokio::fs::create_dir(&output_dir)
             .await
-            .map_err(log_error)?;
+            .map_err(AppError::internal)?;
 
         transcoder::transcode(input_path.to_str().unwrap(), output_dir.to_str().unwrap())
-            .await
-            .map_err(log_error)?;
+            .await?;
 
         // Generate video id and upload segments to bucket
         let video_id = uuid::Uuid::new_v4().to_string();
-        let mut entries = tokio::fs::read_dir(&output_dir).await.map_err(log_error)?;
+        let mut entries = tokio::fs::read_dir(&output_dir).await.map_err(AppError::internal)?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(log_error)? {
+        while let Some(entry) = entries.next_entry().await.map_err(AppError::internal)? {
             let file_name = entry.file_name();
             let file_name = file_name.to_str().unwrap();
-            let bytes = tokio::fs::read(entry.path()).await.map_err(log_error)?;
+            let bytes = tokio::fs::read(entry.path()).await.map_err(AppError::internal)?;
             let key = format!("{}/{}", video_id, file_name);
             state
                 .s3
@@ -105,7 +83,7 @@ pub async fn upload_video(
                 .body(bytes.into())
                 .send()
                 .await
-                .map_err(log_error)?;
+                .map_err(AppError::from_s3)?;
 
             info!("uploaded: {}", key);
         }
@@ -119,32 +97,24 @@ pub async fn upload_video(
             "ready"
         )
         .execute(&state.db)
-        .await
-        .map_err(log_error)?;
+        .await?;
 
         info!("video inserted: {}", share_token);
         return Ok(share_token.to_string().into_response());
     }
 
-    Ok(StatusCode::OK.into_response())
-}
-
-#[derive(sqlx::FromRow)]
-struct VideoRow {
-    id: uuid::Uuid,
-    status: String,
+    Ok(axum::http::StatusCode::OK.into_response())
 }
 
 pub async fn get_video(
     State(state): State<AppState>,
     Path(share_token): Path<String>,
-) -> Result<Response, Response> {
+) -> Result<Response, AppError> {
     let video =
         sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
             .bind(share_token)
             .fetch_one(&state.db)
-            .await
-            .map_err(sqlx_error)?;
+            .await?;
 
     Ok(axum::Json(serde_json::json!({
         "status": video.status
@@ -155,13 +125,12 @@ pub async fn get_video(
 pub async fn get_playlist(
     State(state): State<AppState>,
     Path(share_token): Path<String>,
-) -> Result<Response, Response> {
+) -> Result<Response, AppError> {
     let video =
         sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
             .bind(share_token)
             .fetch_one(&state.db)
-            .await
-            .map_err(sqlx_error)?;
+            .await?;
 
     let key = format!("{}/playlist.m3u8", video.id);
     debug!("fetching key: {}", key);
@@ -173,9 +142,9 @@ pub async fn get_playlist(
         .key(&key)
         .send()
         .await
-        .map_err(s3_error)?;
+        .map_err(AppError::from_s3)?;
 
-    let bytes = object.body.collect().await.map_err(log_error)?.into_bytes();
+    let bytes = object.body.collect().await.map_err(AppError::internal)?.into_bytes();
 
     Ok((
         [(
@@ -190,13 +159,12 @@ pub async fn get_playlist(
 pub async fn get_segment(
     State(state): State<AppState>,
     Path((share_token, segment)): Path<(String, String)>,
-) -> Result<Response, Response> {
+) -> Result<Response, AppError> {
     let video =
         sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
             .bind(&share_token)
             .fetch_one(&state.db)
-            .await
-            .map_err(sqlx_error)?;
+            .await?;
 
     let key = format!("{}/{}", video.id, segment);
 
@@ -207,9 +175,9 @@ pub async fn get_segment(
         .key(&key)
         .send()
         .await
-        .map_err(s3_error)?;
+        .map_err(AppError::from_s3)?;
 
-    let bytes = object.body.collect().await.map_err(log_error)?.into_bytes();
+    let bytes = object.body.collect().await.map_err(AppError::internal)?.into_bytes();
 
     Ok(([(axum::http::header::CONTENT_TYPE, "video/mp2t")], bytes).into_response())
 }
