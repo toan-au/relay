@@ -37,7 +37,7 @@ pub async fn upload_video(
             field.content_type()
         );
         let tmp_dir = tempfile::Builder::new()
-            .prefix("hotpotato-")
+            .prefix("relay-")
             .tempdir_in(".")
             .map_err(AppError::internal)?;
         let input_path = tmp_dir.path().join(format!("input.{}", extension));
