@@ -3,10 +3,10 @@ use tracing::info;
 
 mod errors;
 mod models;
+mod queue;
 mod routes;
 mod state;
 mod storage;
-mod transcoder;
 
 use state::AppState;
 
@@ -25,9 +25,17 @@ async fn main() {
         .expect("Unable to connect to DB");
 
     let s3 = storage::create_s3_client().await;
-    let bucket = "videos".to_string();
+    let bucket = std::env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set");
 
-    let app_state = AppState { db, s3, bucket };
+    let (sqs, queue_url) = queue::create_sqs_client().await;
+
+    let app_state = AppState {
+        db,
+        s3,
+        bucket,
+        sqs,
+        queue_url,
+    };
 
     let bucket_exists = app_state
         .s3

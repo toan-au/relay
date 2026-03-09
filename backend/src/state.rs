@@ -5,4 +5,6 @@ pub struct AppState {
     pub db: PgPool,
     pub s3: aws_sdk_s3::Client,
     pub bucket: String,
+    pub sqs: aws_sdk_sqs::Client,
+    pub queue_url: String,
 }
