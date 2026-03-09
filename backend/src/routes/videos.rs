@@ -25,7 +25,7 @@ fn s3_error(e: impl std::fmt::Display) -> Response {
     if msg.contains("NoSuchKey") {
         StatusCode::NOT_FOUND.into_response()
     } else {
-        eprintln!("s3 error: {}", msg);
+        eprintln!("s3 error: {:?}", msg);
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
 }
@@ -130,6 +130,7 @@ pub async fn upload_video(
 
 #[derive(sqlx::FromRow)]
 struct VideoRow {
+    id: uuid::Uuid,
     status: String,
 }
 
@@ -137,11 +138,12 @@ pub async fn get_video(
     State(state): State<AppState>,
     Path(share_token): Path<String>,
 ) -> Result<Response, Response> {
-    let video = sqlx::query_as::<_, VideoRow>("SELECT status FROM videos WHERE share_token = $1")
-        .bind(share_token)
-        .fetch_one(&state.db)
-        .await
-        .map_err(sqlx_error)?;
+    let video =
+        sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
+            .bind(share_token)
+            .fetch_one(&state.db)
+            .await
+            .map_err(sqlx_error)?;
 
     Ok(axum::Json(serde_json::json!({
         "status": video.status
@@ -153,7 +155,15 @@ pub async fn get_playlist(
     State(state): State<AppState>,
     Path(share_token): Path<String>,
 ) -> Result<Response, Response> {
-    let key = format!("videos/{}/playlist.m3u8", share_token);
+    let video =
+        sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
+            .bind(share_token)
+            .fetch_one(&state.db)
+            .await
+            .map_err(sqlx_error)?;
+
+    let key = format!("{}/playlist.m3u8", video.id);
+    println!("fetching key: {}", key);
 
     let object = state
         .s3
@@ -174,4 +184,31 @@ pub async fn get_playlist(
         bytes,
     )
         .into_response())
+}
+
+pub async fn get_segment(
+    State(state): State<AppState>,
+    Path((share_token, segment)): Path<(String, String)>,
+) -> Result<Response, Response> {
+    let video =
+        sqlx::query_as::<_, VideoRow>("SELECT id, status FROM videos WHERE share_token = $1")
+            .bind(&share_token)
+            .fetch_one(&state.db)
+            .await
+            .map_err(sqlx_error)?;
+
+    let key = format!("{}/{}", video.id, segment);
+
+    let object = state
+        .s3
+        .get_object()
+        .bucket(&state.bucket)
+        .key(&key)
+        .send()
+        .await
+        .map_err(s3_error)?;
+
+    let bytes = object.body.collect().await.map_err(log_error)?.into_bytes();
+
+    Ok(([(axum::http::header::CONTENT_TYPE, "video/mp2t")], bytes).into_response())
 }

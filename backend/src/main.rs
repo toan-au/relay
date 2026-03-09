@@ -52,7 +52,6 @@ async fn main() {
         .run(&app_state.db)
         .await
         .expect("Failed to run migrations");
-    print!("Migrations successfully applied");
 
     // Setup routes
     let app: Router = Router::new()
@@ -65,6 +64,10 @@ async fn main() {
         .route(
             "/api/videos/{share_token}/playlist.m3u8",
             get(routes::videos::get_playlist),
+        )
+        .route(
+            "/api/videos/{share_token}/segment/{segment}",
+            get(routes::videos::get_segment),
         )
         .with_state(app_state);
 
