@@ -4,6 +4,7 @@ use tracing::error;
 #[derive(Debug)]
 pub enum AppError {
     NotFound,
+    BadRequest(String),
     Internal(anyhow::Error),
 }
 
@@ -11,6 +12,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
             AppError::NotFound => StatusCode::NOT_FOUND.into_response(),
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
             AppError::Internal(e) => {
                 error!("{}", e);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()

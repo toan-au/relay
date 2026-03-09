@@ -39,7 +39,14 @@ async fn main() {
             };
 
             let Some((share_token, s3_key)) = parse_message(message.body()) else {
-                warn!("Malformed message, skipping");
+                warn!("Malformed message, deleting");
+                let _ = config
+                    .sqs
+                    .delete_message()
+                    .queue_url(&config.queue_url)
+                    .receipt_handle(receipt_handle)
+                    .send()
+                    .await;
                 continue;
             };
 

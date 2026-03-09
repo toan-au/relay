@@ -1,5 +1,6 @@
 use axum::{
     extract::{Multipart, Path, State},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 
@@ -11,21 +12,33 @@ use crate::state::AppState;
 
 pub async fn upload_video(
     State(state): State<AppState>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
+    if let Some(content_length) = headers.get(axum::http::header::CONTENT_LENGTH) {
+        let len = content_length
+            .to_str()
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+        if len > super::MAX_VIDEO_UPLOAD_SIZE {
+            return Err(AppError::BadRequest("File exceeds 1GB limit".into()));
+        }
+    }
+
     while let Some(mut field) = multipart.next_field().await.map_err(AppError::internal)? {
         if field.name() != Some("video") {
             continue;
         }
 
-        let content_type = field.content_type().unwrap_or("video/mp4").to_owned();
+        let content_type = field.content_type().unwrap_or("").to_owned();
         let extension = match content_type.as_str() {
             "video/mp4" => "mp4",
             "video/quicktime" => "mov",
             "video/x-msvideo" => "avi",
             "video/webm" => "webm",
             "video/x-matroska" => "mkv",
-            _ => "mp4",
+            _ => return Err(AppError::BadRequest(format!("Unsupported video format: {}", content_type))),
         };
 
         debug!(
@@ -40,7 +53,7 @@ pub async fn upload_video(
         }
 
         let video_id = uuid::Uuid::new_v4();
-        let share_token = &uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string();
+        let share_token = uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string();
 
         let s3_key = format!("raw/{}/input.{}", share_token, extension);
 
@@ -56,7 +69,7 @@ pub async fn upload_video(
 
         info!("uploaded raw video to S3: {}", s3_key);
 
-        VideoRow::insert(&state.db, video_id, share_token).await?;
+        VideoRow::insert(&state.db, video_id, &share_token).await?;
 
         info!("video inserted: {}", share_token);
 
