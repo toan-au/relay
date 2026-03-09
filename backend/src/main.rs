@@ -7,6 +7,7 @@ use sqlx::PgPool;
 
 mod routes;
 mod storage;
+mod transcoder;
 
 // 1 gb max file upload
 const MAX_VIDEO_UPLOAD_SIZE: usize = 1024 * 1024 * 1024;
@@ -59,6 +60,11 @@ async fn main() {
         .route(
             "/api/videos",
             post(routes::videos::upload_video).layer(DefaultBodyLimit::max(MAX_VIDEO_UPLOAD_SIZE)),
+        )
+        .route("/api/videos/{share_token}", get(routes::videos::get_video))
+        .route(
+            "/api/videos/{share_token}/playlist.m3u8",
+            get(routes::videos::get_playlist),
         )
         .with_state(app_state);
 
