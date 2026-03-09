@@ -13,6 +13,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "macro
 
 # s3/minio
 aws-sdk-s3 = { version = "1.125.0", features = ["behavior-version-latest"] }
+aws-sdk-sqs = { version = "1", features = ["behavior-version-latest"] }
 aws-config = { version = "1.8.15", features = ["behavior-version-latest"] }
 
 # utils
