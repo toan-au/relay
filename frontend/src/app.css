@@ -1,0 +1,84 @@
+:root {
+  --blue: rgb(79, 175, 249);
+  --blue-light: rgba(79, 175, 249, 0.15);
+  --text: #e8eaf0;
+  --text-muted: #8b909e;
+  --border: #2a2d35;
+  --bg: #13151a;
+  --bg-subtle: #1a1d24;
+  --bg-card: #1e2129;
+
+  font-family: system-ui, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark;
+  color: var(--text);
+  background-color: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  min-width: 320px;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  border-radius: 9999px;
+  padding: 0.6rem 1.6rem;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--blue);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+button.ghost:hover:not(:disabled) {
+  border-color: var(--blue);
+  color: var(--blue);
+}
