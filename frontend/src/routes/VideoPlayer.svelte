@@ -10,16 +10,17 @@
   let toastVisible = $state(false);
 
   let shareUrl = $derived(`${window.location.origin}/video/${token}`);
+  let hls: Hls | null = null;
 
   function initPlayer() {
     const src = `/api/videos/${token}/playlist.m3u8`;
     if (Hls.isSupported()) {
-      const hls = new Hls({
-        liveSyncDurationCount: 2,
-        liveMaxLatencyDurationCount: 5,
+      hls = new Hls({
         manifestLoadingTimeOut: 10000,
-        manifestLoadingMaxRetry: 10,
+        manifestLoadingMaxRetry: 20,
         manifestLoadingRetryDelay: 1000,
+        lowLatencyMode: true,
+        maxBufferLength: 3,
       });
       hls.loadSource(src);
       hls.attachMedia(videoEl);
@@ -39,7 +40,19 @@
   }
 
   async function copyLink() {
-    await navigator.clipboard.writeText(shareUrl);
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch {
+      // Fallback for non-secure contexts (plain HTTP)
+      const el = document.createElement('textarea');
+      el.value = shareUrl;
+      el.style.position = 'fixed';
+      el.style.opacity = '0';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
     toastVisible = true;
     setTimeout(() => (toastVisible = false), 2500);
   }
@@ -60,7 +73,10 @@
       }
     });
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      hls?.destroy();
+    };
   });
 </script>
 
@@ -70,11 +86,22 @@
       <p>Video not found.</p>
       <button class="ghost" onclick={() => navigate('/')}>Go home</button>
     </div>
-  {:else if status !== 'ready'}
+  {:else if status === 'uploading'}
     <div class="processing-card">
       <div class="spinner"></div>
-      <p>Processing your video...</p>
-      <span class="status-badge">{status}</span>
+      <p>Uploading your video...</p>
+      <span class="status-badge">uploading</span>
+    </div>
+  {:else if status === 'processing'}
+    <div class="processing-card">
+      <div class="spinner"></div>
+      <p>Transcoding your video...</p>
+      <span class="status-badge">transcoding</span>
+    </div>
+  {:else if status === 'failed'}
+    <div class="processing-card">
+      <p>Something went wrong.</p>
+      <button class="ghost" onclick={() => navigate('/')}>Try again</button>
     </div>
   {:else}
     <div class="player-wrapper">

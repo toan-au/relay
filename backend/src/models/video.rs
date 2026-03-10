@@ -22,7 +22,20 @@ impl VideoRow {
         sqlx::query("INSERT INTO videos (id, share_token, status) VALUES ($1, $2, $3)")
             .bind(id)
             .bind(share_token)
-            .bind("processing")
+            .bind("uploading")
+            .execute(db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_status(
+        db: &sqlx::PgPool,
+        share_token: &str,
+        status: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE videos SET status = $1 WHERE share_token = $2")
+            .bind(status)
+            .bind(share_token)
             .execute(db)
             .await?;
         Ok(())
