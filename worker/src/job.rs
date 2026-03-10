@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, Duration};
-use tracing::{info};
+use tracing::info;
 
 use crate::config::Config;
 
@@ -25,11 +25,28 @@ pub async fn process(config: &Config, share_token: &str, s3_key: &str) -> Result
     drop(file);
 
     let file_size = std::fs::metadata(&input_path)?.len();
-    info!("Input file written: {} bytes at {:?}", file_size, input_path);
+    info!(
+        "Input file written: {} bytes at {:?}",
+        file_size, input_path
+    );
 
-    transcode_progressive(&config.s3, &config.bucket, &config.db, share_token, &input_path, &output_dir).await?;
+    transcode_progressive(
+        &config.s3,
+        &config.bucket,
+        &config.db,
+        share_token,
+        &input_path,
+        &output_dir,
+    )
+    .await?;
 
-    config.s3.delete_object().bucket(&config.bucket).key(s3_key).send().await?;
+    config
+        .s3
+        .delete_object()
+        .bucket(&config.bucket)
+        .key(s3_key)
+        .send()
+        .await?;
     info!("Deleted raw file: {}", s3_key);
 
     Ok(())
@@ -53,25 +70,41 @@ async fn transcode_progressive(
 
     let mut child = tokio::process::Command::new("ffmpeg")
         .args([
-            "-i", input_path.to_str().unwrap(),
+            "-i",
+            input_path.to_str().unwrap(),
             // Video
-            "-codec:v", "libx264",
-            "-profile:v", "baseline",  
-            "-level", "3.0",
-            "-preset", "fast",         
-            "-crf", "23",              
-            "-maxrate", "2500k",       
-            "-bufsize", "5000k",       
-            "-movflags", "+faststart",
+            "-codec:v",
+            "libx264",
+            "-profile:v",
+            "baseline",
+            "-level",
+            "3.0",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            "-maxrate",
+            "2500k",
+            "-bufsize",
+            "5000k",
+            "-movflags",
+            "+faststart",
             // Audio
-            "-codec:a", "aac",
-            "-b:a", "128k",
-            "-ar", "44100",
+            "-codec:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "44100",
             // HLS
-            "-force_key_frames", "expr:gte(t,n_forced*2)",
-            "-hls_time", "6",
-            "-hls_playlist_type", "event",
-            "-hls_segment_filename", segment_pattern.to_str().unwrap(),
+            "-force_key_frames",
+            "expr:gte(t,n_forced*2)",
+            "-hls_time",
+            "6",
+            "-hls_playlist_type",
+            "event",
+            "-hls_segment_filename",
+            segment_pattern.to_str().unwrap(),
             playlist_path.to_str().unwrap(),
         ])
         .stderr(std::process::Stdio::inherit())
@@ -103,7 +136,11 @@ async fn transcode_progressive(
             // Mark ready after 2 segments — gives player enough buffer to play smoothly
             if !marked_ready && uploaded.len() >= 2 {
                 mark_ready(db, share_token).await?;
-                info!("Marked {} as ready ({} segments available)", share_token, uploaded.len());
+                info!(
+                    "Marked {} as ready ({} segments available)",
+                    share_token,
+                    uploaded.len()
+                );
                 marked_ready = true;
             }
         }
@@ -117,10 +154,15 @@ async fn transcode_progressive(
         }
     }
 
-    // Final playlist upload — now contains #EXT-X-ENDLIST
     let bytes = tokio::fs::read(&playlist_path).await?;
     upload(s3, bucket, &format!("{}/playlist.m3u8", share_token), bytes).await?;
     info!("Transcoding complete for {}", share_token);
+
+    // Fallback
+    if !marked_ready {
+        mark_ready(db, share_token).await?;
+        info!("Marked {} as ready (short video)", share_token);
+    }
 
     Ok(())
 }
