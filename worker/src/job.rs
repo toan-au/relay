@@ -1,7 +1,9 @@
 use aws_sdk_s3::{primitives::ByteStream, Client as S3Client};
+use std::collections::HashSet;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
-use tracing::{error, info};
+use tokio::time::{sleep, Duration};
+use tracing::{info};
 
 use crate::config::Config;
 
@@ -20,17 +22,12 @@ pub async fn process(config: &Config, share_token: &str, s3_key: &str) -> Result
     let mut file = tokio::fs::File::create(&input_path).await?;
     file.write_all(&raw_bytes).await?;
     file.flush().await?;
-    drop(file); // close before ffmpeg reads it
+    drop(file);
 
     let file_size = std::fs::metadata(&input_path)?.len();
     info!("Input file written: {} bytes at {:?}", file_size, input_path);
 
-    transcode(&input_path, &output_dir).await?;
-    info!("Transcoded {}", share_token);
-
-    upload_hls(&config.s3, &config.bucket, share_token, &output_dir).await?;
-    mark_ready(&config.db, share_token).await?;
-    info!("Marked {} as ready", share_token);
+    transcode_progressive(&config.s3, &config.bucket, &config.db, share_token, &input_path, &output_dir).await?;
 
     config.s3.delete_object().bucket(&config.bucket).key(s3_key).send().await?;
     info!("Deleted raw file: {}", s3_key);
@@ -43,61 +40,98 @@ async fn download(s3: &S3Client, bucket: &str, key: &str) -> Result<bytes::Bytes
     Ok(object.body.collect().await?.into_bytes())
 }
 
-async fn transcode(input_path: &Path, output_dir: &Path) -> Result<(), Error> {
+async fn transcode_progressive(
+    s3: &S3Client,
+    bucket: &str,
+    db: &sqlx::PgPool,
+    share_token: &str,
+    input_path: &Path,
+    output_dir: &Path,
+) -> Result<(), Error> {
     let playlist_path = output_dir.join("playlist.m3u8");
     let segment_pattern = output_dir.join("segment%d.ts");
 
-    let output = tokio::process::Command::new("ffmpeg")
+    let mut child = tokio::process::Command::new("ffmpeg")
         .args([
-            "-i",
-            input_path.to_str().unwrap(),
-            "-codec:v",
-            "libx264",
-            "-codec:a",
-            "aac",
-            "-hls_time",
-            "6",
-            "-hls_playlist_type",
-            "vod",
-            "-hls_segment_filename",
-            segment_pattern.to_str().unwrap(),
+            "-i", input_path.to_str().unwrap(),
+            // Video
+            "-codec:v", "libx264",
+            "-profile:v", "baseline",  
+            "-level", "3.0",
+            "-preset", "fast",         
+            "-crf", "23",              
+            "-maxrate", "2500k",       
+            "-bufsize", "5000k",       
+            "-movflags", "+faststart",
+            // Audio
+            "-codec:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+            // HLS
+            "-force_key_frames", "expr:gte(t,n_forced*2)",
+            "-hls_time", "6",
+            "-hls_playlist_type", "event",
+            "-hls_segment_filename", segment_pattern.to_str().unwrap(),
             playlist_path.to_str().unwrap(),
         ])
-        .output()
-        .await?;
+        .stderr(std::process::Stdio::inherit())
+        .spawn()?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        error!("ffmpeg stderr:\n{}", stderr);
-        return Err(format!("ffmpeg exited with status: {}", output.status).into());
+    let mut uploaded: HashSet<String> = HashSet::new();
+    let mut marked_ready = false;
+
+    loop {
+        let mut entries = tokio::fs::read_dir(output_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".ts") || uploaded.contains(&name) {
+                continue;
+            }
+
+            let key = format!("{}/{}", share_token, name);
+            let bytes = tokio::fs::read(entry.path()).await?;
+            upload(s3, bucket, &key, bytes).await?;
+            info!("Uploaded segment {}", key);
+            uploaded.insert(name);
+
+            // Upload the playlist after each new segment so the player can advance
+            if playlist_path.exists() {
+                let bytes = tokio::fs::read(&playlist_path).await?;
+                upload(s3, bucket, &format!("{}/playlist.m3u8", share_token), bytes).await?;
+            }
+
+            // Mark ready after 2 segments — gives player enough buffer to play smoothly
+            if !marked_ready && uploaded.len() >= 2 {
+                mark_ready(db, share_token).await?;
+                info!("Marked {} as ready ({} segments available)", share_token, uploaded.len());
+                marked_ready = true;
+            }
+        }
+
+        match child.try_wait()? {
+            Some(status) if status.success() => break,
+            Some(status) => {
+                return Err(format!("ffmpeg exited with status: {}", status).into());
+            }
+            None => sleep(Duration::from_secs(1)).await,
+        }
     }
+
+    // Final playlist upload — now contains #EXT-X-ENDLIST
+    let bytes = tokio::fs::read(&playlist_path).await?;
+    upload(s3, bucket, &format!("{}/playlist.m3u8", share_token), bytes).await?;
+    info!("Transcoding complete for {}", share_token);
 
     Ok(())
 }
 
-async fn upload_hls(
-    s3: &S3Client,
-    bucket: &str,
-    share_token: &str,
-    output_dir: &Path,
-) -> Result<(), Error> {
-    let mut entries = tokio::fs::read_dir(output_dir).await?;
-
-    while let Some(entry) = entries.next_entry().await? {
-        let file_name = entry.file_name();
-        let key = format!("{}/{}", share_token, file_name.to_str().unwrap());
-        let bytes = tokio::fs::read(entry.path()).await?;
-
-        s3.put_object()
-            .bucket(bucket)
-            .key(&key)
-            .body(ByteStream::from(bytes))
-            .send()
-            .await?;
-
-        info!("Uploaded {}", key);
-    }
-
+async fn upload(s3: &S3Client, bucket: &str, key: &str, bytes: Vec<u8>) -> Result<(), Error> {
+    s3.put_object()
+        .bucket(bucket)
+        .key(key)
+        .body(ByteStream::from(bytes))
+        .send()
+        .await?;
     Ok(())
 }
 

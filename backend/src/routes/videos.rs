@@ -54,45 +54,65 @@ pub async fn upload_video(
 
         let video_id = uuid::Uuid::new_v4();
         let share_token = uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string();
-
         let s3_key = format!("raw/{}/input.{}", share_token, extension);
 
-        state
-            .s3
-            .put_object()
-            .bucket(&state.bucket)
-            .key(&s3_key)
-            .body(buffer.into())
-            .send()
-            .await
-            .map_err(AppError::from_s3)?;
-
-        info!("uploaded raw video to S3: {}", s3_key);
-
         VideoRow::insert(&state.db, video_id, &share_token).await?;
-
         info!("video inserted: {}", share_token);
 
-        let message = serde_json::json!({
-            "share_token": share_token,
-            "s3_key": s3_key,
+        // Return immediately — S3 upload and SQS enqueue happen in the background
+        let state = state.clone();
+        let token = share_token.clone();
+        tokio::spawn(async move {
+            let failed = upload_and_enqueue(state.clone(), token.clone(), s3_key, buffer)
+                .await
+                .map_err(|e| e.to_string());
+            if let Err(e) = failed {
+                tracing::error!("background upload failed for {}: {}", token, e);
+                let _ = VideoRow::update_status(&state.db, &token, "failed").await;
+            }
         });
 
-        state
-            .sqs
-            .send_message()
-            .queue_url(&state.queue_url)
-            .message_body(message.to_string())
-            .send()
-            .await
-            .map_err(AppError::internal)?;
-
-        info!("SQS job enqueued for: {}", share_token);
-
-        return Ok(share_token.to_string().into_response());
+        return Ok(share_token.into_response());
     }
 
     Ok(axum::http::StatusCode::OK.into_response())
+}
+
+async fn upload_and_enqueue(
+    state: crate::state::AppState,
+    share_token: String,
+    s3_key: String,
+    buffer: Vec<u8>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    state
+        .s3
+        .put_object()
+        .bucket(&state.bucket)
+        .key(&s3_key)
+        .body(buffer.into())
+        .send()
+        .await?;
+
+    info!("uploaded raw video to S3: {}", s3_key);
+
+    VideoRow::update_status(&state.db, &share_token, "processing").await?;
+
+    let message = serde_json::json!({
+        "share_token": share_token,
+        "s3_key": s3_key,
+    });
+
+    state
+        .sqs
+        .send_message()
+        .queue_url(&state.queue_url)
+        .message_body(message.to_string())
+        .send()
+        .await?;
+
+    info!("SQS job enqueued for: {}", share_token);
+
+    Ok(())
 }
 
 pub async fn get_video(
@@ -133,10 +153,10 @@ pub async fn get_playlist(
         .into_bytes();
 
     Ok((
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "application/vnd.apple.mpegurl",
-        )],
+        [
+            (axum::http::header::CONTENT_TYPE, "application/vnd.apple.mpegurl"),
+            (axum::http::header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
+        ],
         bytes,
     )
         .into_response())
