@@ -5,9 +5,9 @@ use aws_sdk_sqs::{
 
 pub async fn create_sqs_client() -> (Client, String) {
     let endpoint = std::env::var("SQS_ENDPOINT").expect("SQS_ENDPOINT must be set");
-    let access_key_id = std::env::var("S3_ACCESS_KEY_ID").expect("S3_ACCESS_KEY_ID must be set");
+    let access_key_id = std::env::var("SQS_ACCESS_KEY_ID").expect("SQS_ACCESS_KEY_ID must be set");
     let secret_access_key =
-        std::env::var("S3_SECRET_ACCESS_KEY").expect("S3_SECRET_ACCESS_KEY must be set");
+        std::env::var("SQS_SECRET_ACCESS_KEY").expect("SQS_SECRET_ACCESS_KEY must be set");
     let region =
         Region::new(std::env::var("S3_REGION").unwrap_or_else(|_| "ap-northeast-1".to_string()));
 

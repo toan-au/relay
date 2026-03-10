@@ -71,5 +71,7 @@ cd frontend && npm install && npm run dev
 | `S3_ENDPOINT`         | S3-compatible endpoint                            |
 | `S3_REGION`           | S3 region                                         |
 | `S3_BUCKET_NAME`      | Bucket for video storage                          |
-| `SQS_ENDPOINT`        | SQS-compatible endpoint                           |
-| `SQS_QUEUE_URL`       | Full URL of the transcoding queue                 |
+| `SQS_ENDPOINT`          | SQS-compatible endpoint                                        |
+| `SQS_QUEUE_URL`         | Full URL of the transcoding queue                              |
+| `SQS_ACCESS_KEY_ID`     | SQS access key (any value works locally, required for AWS SQS) |
+| `SQS_SECRET_ACCESS_KEY` | SQS secret key (any value works locally, required for AWS SQS) |

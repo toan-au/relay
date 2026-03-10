@@ -21,8 +21,13 @@ pub async fn init() -> Config {
         std::env::var("S3_SECRET_ACCESS_KEY").expect("S3_SECRET_ACCESS_KEY must be set");
     let region = std::env::var("S3_REGION").unwrap_or_else(|_| "ap-northeast-1".to_string());
 
+    let sqs_access_key_id =
+        std::env::var("SQS_ACCESS_KEY_ID").expect("SQS_ACCESS_KEY_ID must be set");
+    let sqs_secret_access_key =
+        std::env::var("SQS_SECRET_ACCESS_KEY").expect("SQS_SECRET_ACCESS_KEY must be set");
+
     let s3 = create_s3_client(&access_key_id, &secret_access_key, &region);
-    let sqs = create_sqs_client(&access_key_id, &secret_access_key, &region);
+    let sqs = create_sqs_client(&sqs_access_key_id, &sqs_secret_access_key, &region);
 
     let db =
         sqlx::PgPool::connect(&std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"))
