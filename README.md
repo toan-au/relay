@@ -30,7 +30,7 @@ cp .env.example .env
 docker compose up
 ```
 
-Open `http://localhost`.
+Open `http://127.0.0.1`. not localhost
 
 ### Local development
 
@@ -61,16 +61,16 @@ cd frontend && npm install && npm run dev
 
 ## Root Environment Variables
 
-| Variable              | Description                                       |
-| --------------------- | ------------------------------------------------- |
-| `POSTGRES_DB`         | Database name                                     |
-| `POSTGRES_USER`       | Database user                                     |
-| `POSTGRES_PASSWORD`   | Database password                                 |
-| `MINIO_ROOT_USER`     | MinIO admin user (also used as S3 access key)     |
-| `MINIO_ROOT_PASSWORD` | MinIO admin password (also used as S3 secret key) |
-| `S3_ENDPOINT`         | S3-compatible endpoint                            |
-| `S3_REGION`           | S3 region                                         |
-| `S3_BUCKET_NAME`      | Bucket for video storage                          |
+| Variable                | Description                                                    |
+| ----------------------- | -------------------------------------------------------------- |
+| `POSTGRES_DB`           | Database name                                                  |
+| `POSTGRES_USER`         | Database user                                                  |
+| `POSTGRES_PASSWORD`     | Database password                                              |
+| `MINIO_ROOT_USER`       | MinIO admin user (also used as S3 access key)                  |
+| `MINIO_ROOT_PASSWORD`   | MinIO admin password (also used as S3 secret key)              |
+| `S3_ENDPOINT`           | S3-compatible endpoint                                         |
+| `S3_REGION`             | S3 region                                                      |
+| `S3_BUCKET_NAME`        | Bucket for video storage                                       |
 | `SQS_ENDPOINT`          | SQS-compatible endpoint                                        |
 | `SQS_QUEUE_URL`         | Full URL of the transcoding queue                              |
 | `SQS_ACCESS_KEY_ID`     | SQS access key (any value works locally, required for AWS SQS) |
