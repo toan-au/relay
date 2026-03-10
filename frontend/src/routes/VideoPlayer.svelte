@@ -14,9 +14,16 @@
   function initPlayer() {
     const src = `/api/videos/${token}/playlist.m3u8`;
     if (Hls.isSupported()) {
-      const hls = new Hls();
+      const hls = new Hls({
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 5,
+        manifestLoadingTimeOut: 10000,
+        manifestLoadingMaxRetry: 10,
+        manifestLoadingRetryDelay: 1000,
+      });
       hls.loadSource(src);
       hls.attachMedia(videoEl);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => videoEl.play());
     } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
       videoEl.src = src;
     }
