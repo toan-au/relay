@@ -38,7 +38,12 @@ pub async fn upload_video(
             "video/x-msvideo" => "avi",
             "video/webm" => "webm",
             "video/x-matroska" => "mkv",
-            _ => return Err(AppError::BadRequest(format!("Unsupported video format: {}", content_type))),
+            _ => {
+                return Err(AppError::BadRequest(format!(
+                    "Unsupported video format: {}",
+                    content_type
+                )))
+            }
         };
 
         debug!(
@@ -154,8 +159,14 @@ pub async fn get_playlist(
 
     Ok((
         [
-            (axum::http::header::CONTENT_TYPE, "application/vnd.apple.mpegurl"),
-            (axum::http::header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/vnd.apple.mpegurl",
+            ),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "no-cache, no-store, must-revalidate",
+            ),
         ],
         bytes,
     )

@@ -4,10 +4,7 @@ pub struct VideoRow {
 }
 
 impl VideoRow {
-    pub async fn fetch_by_token(
-        db: &sqlx::PgPool,
-        share_token: &str,
-    ) -> Result<Self, sqlx::Error> {
+    pub async fn fetch_by_token(db: &sqlx::PgPool, share_token: &str) -> Result<Self, sqlx::Error> {
         sqlx::query_as::<_, Self>("SELECT status FROM videos WHERE share_token = $1")
             .bind(share_token)
             .fetch_one(db)
