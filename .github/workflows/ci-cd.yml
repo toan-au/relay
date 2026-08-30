@@ -1,0 +1,193 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-check:
+    name: Backend (fmt, clippy, build, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - name: fmt
+        working-directory: backend
+        run: cargo fmt --check
+      - name: clippy
+        working-directory: backend
+        run: cargo clippy --all-targets -- -D warnings
+      - name: build
+        working-directory: backend
+        run: cargo build --all-targets
+      - name: test
+        working-directory: backend
+        run: cargo test
+
+  worker-check:
+    name: Worker (fmt, clippy, build, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: worker
+      - name: fmt
+        working-directory: worker
+        run: cargo fmt --check
+      - name: clippy
+        working-directory: worker
+        run: cargo clippy --all-targets -- -D warnings
+      - name: build
+        working-directory: worker
+        run: cargo build --all-targets
+      - name: test
+        working-directory: worker
+        run: cargo test
+
+  frontend-check:
+    name: Frontend (typecheck, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - working-directory: frontend
+        run: bun install --frozen-lockfile
+      - working-directory: frontend
+        run: bun run check
+      - working-directory: frontend
+        run: bun run build
+
+  prepare:
+    name: Compute image repo path
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      ghcr_repo: ${{ steps.vars.outputs.ghcr_repo }}
+    steps:
+      - id: vars
+        run: echo "ghcr_repo=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    name: Build & push images
+    needs: [backend-check, worker-check, frontend-check, prepare]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - name: worker
+            context: ./worker
+            dockerfile: ./worker/Dockerfile
+          - name: frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+          - name: elasticmq
+            context: .
+            dockerfile: ./elasticmq.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.ghcr_repo }}-${{ matrix.name }}:${{ github.sha }}
+            ${{ needs.prepare.outputs.ghcr_repo }}-${{ matrix.name }}:latest
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  check-deploy-secrets:
+    name: Check deploy target configured
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        run: |
+          if [ -n "${{ secrets.DEPLOY_HOST }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Deploy to droplet
+    needs: [prepare, build-and-push, check-deploy-secrets]
+    if: needs.check-deploy-secrets.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure remote deploy directory exists
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: mkdir -p ~/relay
+
+      - name: Write production .env
+        run: |
+          cat > .env.prod <<'ENVEOF'
+          ${{ secrets.PROD_ENV_FILE }}
+          ENVEOF
+          echo "GHCR_REPO=${{ needs.prepare.outputs.ghcr_repo }}" >> .env.prod
+          echo "IMAGE_TAG=${{ github.sha }}" >> .env.prod
+
+      - name: Copy compose file and env to droplet
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "docker-compose.prod.yaml,.env.prod"
+          target: "~/relay"
+          strip_components: 0
+
+      - name: Pull images and restart stack
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          envs: REGISTRY_USER,REGISTRY_TOKEN
+          script: |
+            cd ~/relay
+            mv .env.prod .env
+            echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+            docker compose -f docker-compose.prod.yaml --env-file .env pull
+            docker compose -f docker-compose.prod.yaml --env-file .env up -d --remove-orphans
+            docker image prune -f

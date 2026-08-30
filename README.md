@@ -75,3 +75,25 @@ cd frontend && npm install && npm run dev
 | `SQS_QUEUE_URL`         | Full URL of the transcoding queue                              |
 | `SQS_ACCESS_KEY_ID`     | SQS access key (any value works locally, required for AWS SQS) |
 | `SQS_SECRET_ACCESS_KEY` | SQS secret key (any value works locally, required for AWS SQS) |
+
+## CI/CD
+
+`.github/workflows/ci-cd.yml` runs on every push/PR:
+
+1. **Checks** — `cargo fmt` + `clippy` + `build` + `test` for `backend` and `worker`, `svelte-check` + `vite build` for `frontend`.
+2. **Build & push** (push to `main` only) — builds `backend`, `worker`, `frontend`, `elasticmq` images and pushes them to GHCR, tagged with the commit SHA.
+3. **Deploy** (push to `main` only, skipped if deploy secrets aren't set) — copies `docker-compose.prod.yaml` to the target host over SSH and runs `docker compose pull && up -d`.
+
+Deploying to a host is optional — the pipeline builds and tests happily with none of the secrets below configured; the deploy job just no-ops until they're added.
+
+### Deploy secrets (GitHub repo → Settings → Secrets and variables → Actions)
+
+| Secret            | Description                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `PROD_ENV_FILE`    | The full contents of a production `.env` (same shape as `.env.example`, real values)     |
+| `DEPLOY_HOST`      | SSH host/IP of the target server (e.g. a DigitalOcean droplet)                           |
+| `DEPLOY_USER`      | SSH user on the target server                                                            |
+| `DEPLOY_SSH_KEY`   | Private SSH key for that user                                                            |
+| `DEPLOY_PORT`      | SSH port (optional, defaults to 22)                                                      |
+
+The target server needs Docker + the Compose plugin installed, and a `~/relay` directory for the pipeline to write to. Adminer and the MinIO console are bound to `127.0.0.1` only in production (`docker-compose.prod.yaml`) — reach them over an SSH tunnel, not directly over the internet.
