@@ -184,3 +184,11 @@ async fn mark_ready(db: &sqlx::PgPool, share_token: &str) -> Result<(), Error> {
         .await?;
     Ok(())
 }
+
+pub async fn mark_error(db: &sqlx::PgPool, share_token: &str) -> Result<(), Error> {
+    sqlx::query("UPDATE videos SET status = 'error' WHERE share_token = $1")
+        .bind(share_token)
+        .execute(db)
+        .await?;
+    Ok(())
+}

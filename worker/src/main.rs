@@ -65,7 +65,21 @@ async fn main() {
                 }
                 Err(e) => {
                     error!("Job failed for {}: {}", share_token, e);
-                    // visibility timeout expires → message is retried automatically
+                    let _ = job::mark_error(&config.db, &share_token).await;
+                    let _ = config
+                        .s3
+                        .delete_object()
+                        .bucket(&config.bucket)
+                        .key(&s3_key)
+                        .send()
+                        .await;
+                    let _ = config
+                        .sqs
+                        .delete_message()
+                        .queue_url(&config.queue_url)
+                        .receipt_handle(receipt_handle)
+                        .send()
+                        .await;
                 }
             }
         }

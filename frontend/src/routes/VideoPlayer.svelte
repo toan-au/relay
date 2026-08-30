@@ -60,14 +60,14 @@
   onMount(() => {
     const interval = setInterval(async () => {
       const ok = await poll();
-      if (!ok || status === 'ready') {
+      if (!ok || status === 'ready' || status === 'error') {
         clearInterval(interval);
         if (status === 'ready') initPlayer();
       }
     }, 3000);
 
     poll().then((ok) => {
-      if (!ok || status === 'ready') {
+      if (!ok || status === 'ready' || status === 'error') {
         clearInterval(interval);
         if (status === 'ready') initPlayer();
       }
@@ -98,9 +98,9 @@
       <p>Transcoding your video...</p>
       <span class="status-badge">transcoding</span>
     </div>
-  {:else if status === 'failed'}
+  {:else if status === 'failed' || status === 'error'}
     <div class="processing-card">
-      <p>Something went wrong.</p>
+      <p>Something went wrong processing your video.</p>
       <button class="ghost" onclick={() => navigate('/')}>Try again</button>
     </div>
   {:else}
