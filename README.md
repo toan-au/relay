@@ -46,9 +46,11 @@ Set up local env files:
 
 generate `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` at http://localhost:9001 after starting the infra
 
+`backend` and `worker` need identical values here, so `worker/.env` is a symlink to `backend/.env` rather than a second copy - keeps the two from drifting out of sync:
+
 ```bash
 cp backend/.env.example backend/.env
-cp worker/.env.example  worker/.env
+ln -s ../backend/.env worker/.env
 ```
 
 Then in separate terminals:
