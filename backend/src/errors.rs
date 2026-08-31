@@ -1,3 +1,5 @@
+use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::operation::get_object::GetObjectError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -44,12 +46,15 @@ impl AppError {
         AppError::Internal(e.into())
     }
 
-    pub fn from_s3(e: impl std::fmt::Display) -> Self {
-        let msg = e.to_string();
-        if msg.contains("NoSuchKey") {
+    pub fn from_s3(e: SdkError<GetObjectError>) -> Self {
+        // SdkError's Display only ever renders a generic summary like
+        // "service error" - the specific error code (e.g. NoSuchKey) is
+        // only available through the typed service-error accessor.
+        let not_found = e.as_service_error().is_some_and(|err| err.is_no_such_key());
+        if not_found {
             AppError::NotFound
         } else {
-            AppError::Internal(anyhow::anyhow!("s3 error: {}", msg))
+            AppError::Internal(anyhow::anyhow!("s3 error: {e:?}"))
         }
     }
 }

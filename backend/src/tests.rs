@@ -218,6 +218,25 @@ async fn recording_a_view_increments_and_persists() {
 }
 
 #[tokio::test]
+async fn playlist_for_missing_s3_object_returns_404_not_500() {
+    let app = routes::router(test_state().await);
+    // A row exists, but no worker has run yet, so the S3 object doesn't.
+    let share_token = upload(&app).await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/videos/{share_token}/playlist.m3u8"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn recording_a_view_for_unknown_token_returns_404() {
     let app = routes::router(test_state().await);
 
