@@ -28,6 +28,7 @@ jobs:
       SQS_QUEUE_URL: http://localhost:9324/000000000000/transcoding-jobs
       SQS_ACCESS_KEY_ID: test
       SQS_SECRET_ACCESS_KEY: test
+      ADMIN_PASSWORD: test-admin-password
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

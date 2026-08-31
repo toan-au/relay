@@ -10,6 +10,7 @@ use tracing::error;
 pub enum AppError {
     NotFound,
     BadRequest(String),
+    Unauthorized,
     Internal(anyhow::Error),
 }
 
@@ -18,6 +19,7 @@ impl IntoResponse for AppError {
         match self {
             AppError::NotFound => StatusCode::NOT_FOUND.into_response(),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
+            AppError::Unauthorized => StatusCode::UNAUTHORIZED.into_response(),
             AppError::Internal(e) => {
                 error!("{}", e);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()

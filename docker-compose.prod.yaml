@@ -60,6 +60,7 @@ services:
       SQS_QUEUE_URL: ${SQS_QUEUE_URL}
       SQS_ACCESS_KEY_ID: ${SQS_ACCESS_KEY_ID}
       SQS_SECRET_ACCESS_KEY: ${SQS_SECRET_ACCESS_KEY}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy

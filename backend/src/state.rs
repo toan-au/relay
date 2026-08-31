@@ -7,4 +7,5 @@ pub struct AppState {
     pub bucket: String,
     pub sqs: aws_sdk_sqs::Client,
     pub queue_url: String,
+    pub admin_password: String,
 }

@@ -77,6 +77,11 @@ cd frontend && pnpm install && pnpm run dev
 | `SQS_QUEUE_URL`         | Full URL of the transcoding queue                              |
 | `SQS_ACCESS_KEY_ID`     | SQS access key (any value works locally, required for AWS SQS) |
 | `SQS_SECRET_ACCESS_KEY` | SQS secret key (any value works locally, required for AWS SQS) |
+| `ADMIN_PASSWORD`        | Shared password for the `/admin` dashboard                     |
+
+## Admin dashboard
+
+`/admin` — log in with `ADMIN_PASSWORD` to view all videos (title, status, view count, upload date), edit titles, delete videos, and see aggregate stats. Single shared password, no per-admin accounts — login sets a session cookie backed by an `admin_sessions` table (24h expiry); logging out or letting it expire is the only way to revoke it.
 
 ## Testing
 

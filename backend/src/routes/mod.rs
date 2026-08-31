@@ -1,8 +1,9 @@
+pub mod admin;
 pub mod videos;
 
 use axum::{
     extract::DefaultBodyLimit,
-    routing::{get, post},
+    routing::{get, patch, post},
     Router,
 };
 
@@ -26,6 +27,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/videos/{share_token}/{segment}",
             get(videos::get_segment),
+        )
+        .route("/api/admin/login", post(admin::login))
+        .route("/api/admin/logout", post(admin::logout))
+        .route("/api/admin/videos", get(admin::list_videos))
+        .route("/api/admin/stats", get(admin::get_stats))
+        .route(
+            "/api/admin/videos/{share_token}",
+            patch(admin::update_title).delete(admin::delete_video),
         )
         .with_state(state)
 }

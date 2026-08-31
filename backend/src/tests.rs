@@ -37,12 +37,16 @@ async fn test_state() -> AppState {
 
     let (sqs, queue_url) = queue::create_sqs_client().await;
 
+    let admin_password =
+        std::env::var("ADMIN_PASSWORD").expect("ADMIN_PASSWORD must be set for tests");
+
     AppState {
         db,
         s3,
         bucket,
         sqs,
         queue_url,
+        admin_password,
     }
 }
 
@@ -70,6 +74,274 @@ fn multipart_video_with_title_body(boundary: &str, title: &str) -> String {
          not-really-a-video\r\n\
          --{boundary}--\r\n"
     )
+}
+
+#[tokio::test]
+async fn admin_login_with_wrong_password_is_rejected() {
+    let app = routes::router(test_state().await);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/login")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"wrong"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn admin_login_with_correct_password_grants_access_to_protected_routes() {
+    let state = test_state().await;
+    let password = state.admin_password.clone();
+    let app = routes::router(state);
+
+    let login_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "password": password }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login_res.status(), StatusCode::OK);
+
+    let cookie = login_res
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("login should set a session cookie")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    // Without the cookie, the protected route is rejected.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/admin/videos")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // With the session cookie, it succeeds.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/admin/videos")
+                .header(axum::http::header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+async fn admin_login(app: &Router, state: &AppState) -> String {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "password": state.admin_password }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    res.headers()
+        .get(axum::http::header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn admin_stats_reflects_uploaded_videos() {
+    let state = test_state().await;
+    let app = routes::router(state.clone());
+    let cookie = admin_login(&app, &state).await;
+
+    upload(&app).await;
+    upload(&app).await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/admin/stats")
+                .header(axum::http::header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["total_videos"].as_i64().unwrap() >= 2);
+}
+
+#[tokio::test]
+async fn admin_can_update_a_videos_title() {
+    let state = test_state().await;
+    let app = routes::router(state.clone());
+    let cookie = admin_login(&app, &state).await;
+    let share_token = upload(&app).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/api/admin/videos/{share_token}"))
+                .header(axum::http::header::COOKIE, &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"title":"Renamed"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/videos/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["title"].as_str().unwrap(), "Renamed");
+}
+
+#[tokio::test]
+async fn admin_updating_title_of_unknown_video_returns_404() {
+    let state = test_state().await;
+    let app = routes::router(state.clone());
+    let cookie = admin_login(&app, &state).await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/admin/videos/doesnotexist")
+                .header(axum::http::header::COOKIE, cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"title":"Renamed"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_can_delete_a_video() {
+    let state = test_state().await;
+    let app = routes::router(state.clone());
+    let cookie = admin_login(&app, &state).await;
+    let share_token = upload(&app).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/admin/videos/{share_token}"))
+                .header(axum::http::header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/videos/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_deleting_unknown_video_returns_404() {
+    let state = test_state().await;
+    let app = routes::router(state.clone());
+    let cookie = admin_login(&app, &state).await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/admin/videos/doesnotexist")
+                .header(axum::http::header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_logout_invalidates_the_session() {
+    let state = test_state().await;
+    let app = routes::router(state.clone());
+    let cookie = admin_login(&app, &state).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admin/logout")
+                .header(axum::http::header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/admin/videos")
+                .header(axum::http::header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

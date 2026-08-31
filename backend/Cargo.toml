@@ -26,6 +26,8 @@ tempfile = "3.26.0"
 anyhow = "1.0.102"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+time = "0.3.55"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

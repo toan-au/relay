@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 use tracing::info;
 
+mod auth;
 mod errors;
 mod models;
 mod queue;
@@ -30,12 +31,15 @@ async fn main() {
 
     let (sqs, queue_url) = queue::create_sqs_client().await;
 
+    let admin_password = std::env::var("ADMIN_PASSWORD").expect("ADMIN_PASSWORD must be set");
+
     let app_state = AppState {
         db,
         s3,
         bucket,
         sqs,
         queue_url,
+        admin_password,
     };
 
     let bucket_exists = app_state
