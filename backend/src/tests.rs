@@ -23,12 +23,15 @@ async fn test_state() -> AppState {
 
     let s3 = storage::create_s3_client().await;
     let bucket = std::env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set for tests");
-    if s3.head_bucket().bucket(&bucket).send().await.is_err() {
-        s3.create_bucket()
-            .bucket(&bucket)
-            .send()
-            .await
-            .expect("failed to create test bucket");
+    // Tests run concurrently and can race to create the bucket - a
+    // "someone already made it" response is success, not failure.
+    if let Err(err) = s3.create_bucket().bucket(&bucket).send().await {
+        let already_exists = err
+            .as_service_error()
+            .is_some_and(|e| e.is_bucket_already_owned_by_you() || e.is_bucket_already_exists());
+        if !already_exists {
+            panic!("failed to create test bucket: {err}");
+        }
     }
 
     let (sqs, queue_url) = queue::create_sqs_client().await;
