@@ -92,3 +92,32 @@ fn parse_message(body: Option<&str>) -> Option<(String, String)> {
     let s3_key = payload["s3_key"].as_str()?.to_string();
     Some((share_token, s3_key))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_message;
+
+    #[test]
+    fn parses_share_token_and_s3_key() {
+        let body = r#"{"share_token": "abc12345", "s3_key": "raw/abc12345/input.mp4"}"#;
+        let (share_token, s3_key) = parse_message(Some(body)).unwrap();
+        assert_eq!(share_token, "abc12345");
+        assert_eq!(s3_key, "raw/abc12345/input.mp4");
+    }
+
+    #[test]
+    fn returns_none_for_missing_body() {
+        assert!(parse_message(None).is_none());
+    }
+
+    #[test]
+    fn returns_none_for_invalid_json() {
+        assert!(parse_message(Some("not json")).is_none());
+    }
+
+    #[test]
+    fn returns_none_when_fields_missing() {
+        assert!(parse_message(Some(r#"{"share_token": "abc12345"}"#)).is_none());
+        assert!(parse_message(Some(r#"{"s3_key": "raw/abc12345/input.mp4"}"#)).is_none());
+    }
+}

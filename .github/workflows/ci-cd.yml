@@ -10,6 +10,24 @@ jobs:
   backend-check:
     name: Backend (fmt, clippy, build, test)
     runs-on: ubuntu-latest
+    env:
+      # Throwaway credentials for CI-local infra only - unrelated to any
+      # real deploy secrets.
+      POSTGRES_DB: relay_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/relay_test
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_REGION: ap-northeast-1
+      S3_BUCKET_NAME: videos
+      SQS_ENDPOINT: http://localhost:9324
+      SQS_QUEUE_URL: http://localhost:9324/000000000000/transcoding-jobs
+      SQS_ACCESS_KEY_ID: test
+      SQS_SECRET_ACCESS_KEY: test
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -27,9 +45,14 @@ jobs:
       - name: build
         working-directory: backend
         run: cargo build --all-targets
+      - name: start infra (postgres, minio, elasticmq)
+        run: docker compose up -d --wait postgres minio elasticmq
       - name: test
         working-directory: backend
         run: cargo test
+      - name: stop infra
+        if: always()
+        run: docker compose down -v
 
   worker-check:
     name: Worker (fmt, clippy, build, test)

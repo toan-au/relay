@@ -7,6 +7,7 @@ mod queue;
 mod routes;
 mod state;
 mod storage;
+mod tests;
 
 use state::AppState;
 

@@ -1281,6 +1281,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "uuid",
