@@ -2,6 +2,7 @@
 
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use tower::ServiceExt;
 
 use crate::routes;
@@ -89,10 +90,8 @@ async fn unknown_share_token_returns_404() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-async fn upload_reaches_processing() {
-    let app = routes::router(test_state().await);
-
+/// Uploads a test video and returns its share token.
+async fn upload(app: &Router) -> String {
     let boundary = "HotPotatoTestBoundary";
     let req = Request::builder()
         .method("POST")
@@ -110,6 +109,13 @@ async fn upload_reaches_processing() {
     let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let share_token = String::from_utf8(body.to_vec()).unwrap();
     assert_eq!(share_token.len(), 8);
+    share_token
+}
+
+#[tokio::test]
+async fn upload_reaches_processing() {
+    let app = routes::router(test_state().await);
+    let share_token = upload(&app).await;
 
     // The S3 upload + SQS enqueue happen in a background task, so poll
     // for the status to move past the initial "uploading" write.
@@ -165,4 +171,66 @@ async fn upload_rejects_unsupported_content_type() {
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+async fn view_count(app: &Router, share_token: &str) -> i64 {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/videos/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    json["view_count"].as_i64().unwrap()
+}
+
+#[tokio::test]
+async fn recording_a_view_increments_and_persists() {
+    let app = routes::router(test_state().await);
+    let share_token = upload(&app).await;
+
+    assert_eq!(view_count(&app, &share_token).await, 0);
+
+    for expected in 1..=2 {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/videos/{share_token}/view"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["view_count"].as_i64().unwrap(), expected);
+        assert_eq!(view_count(&app, &share_token).await, expected);
+    }
+}
+
+#[tokio::test]
+async fn recording_a_view_for_unknown_token_returns_404() {
+    let app = routes::router(test_state().await);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/videos/doesnotexist/view")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

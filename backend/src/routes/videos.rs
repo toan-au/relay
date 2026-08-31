@@ -127,9 +127,19 @@ pub async fn get_video(
     let video = VideoRow::fetch_by_token(&state.db, &share_token).await?;
 
     Ok(axum::Json(serde_json::json!({
-        "status": video.status
+        "status": video.status,
+        "view_count": video.view_count
     }))
     .into_response())
+}
+
+pub async fn record_view(
+    State(state): State<AppState>,
+    Path(share_token): Path<String>,
+) -> Result<Response, AppError> {
+    let view_count = VideoRow::increment_view_count(&state.db, &share_token).await?;
+
+    Ok(axum::Json(serde_json::json!({ "view_count": view_count })).into_response())
 }
 
 pub async fn get_playlist(

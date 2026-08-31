@@ -18,6 +18,7 @@ pub fn router(state: AppState) -> Router {
             post(videos::upload_video).layer(DefaultBodyLimit::max(MAX_VIDEO_UPLOAD_SIZE)),
         )
         .route("/api/videos/{share_token}", get(videos::get_video))
+        .route("/api/videos/{share_token}/view", post(videos::record_view))
         .route(
             "/api/videos/{share_token}/playlist.m3u8",
             get(videos::get_playlist),

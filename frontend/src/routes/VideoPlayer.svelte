@@ -8,11 +8,25 @@
   let notFound = $state(false);
   let videoEl = $state<HTMLVideoElement>(null!);
   let toastVisible = $state(false);
+  let viewCount = $state<number | null>(null);
 
   let shareUrl = $derived(`${window.location.origin}/video/${token}`);
   let hls: Hls | null = null;
 
+  async function recordView() {
+    try {
+      const res = await fetch(`/api/videos/${token}/view`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        viewCount = data.view_count;
+      }
+    } catch {
+      // best-effort - a failed view count shouldn't block playback
+    }
+  }
+
   function initPlayer() {
+    recordView();
     const src = `/api/videos/${token}/playlist.m3u8`;
     if (Hls.isSupported()) {
       hls = new Hls({
@@ -36,6 +50,7 @@
     if (!res.ok) return false;
     const data = await res.json();
     status = data.status;
+    viewCount = data.view_count;
     return true;
   }
 
@@ -112,6 +127,9 @@
   {#if !notFound}
     <div class="share-bar">
       <span class="share-url">{shareUrl}</span>
+      {#if viewCount !== null}
+        <span class="view-count">{viewCount} {viewCount === 1 ? 'view' : 'views'}</span>
+      {/if}
       <button class="primary" onclick={copyLink}>Copy link</button>
       <button class="ghost" onclick={() => navigate('/')}>Upload another</button>
     </div>
@@ -203,6 +221,12 @@
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .view-count {
+    font-size: 0.9rem;
+    color: var(--text-muted);
     white-space: nowrap;
   }
 
