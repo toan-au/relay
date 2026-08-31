@@ -96,11 +96,19 @@ docker compose up postgres minio elasticmq
 cd backend && cargo test
 ```
 
+Frontend uses Vitest + Testing Library (jsdom), no infra needed:
+
+```bash
+cd frontend && pnpm run test
+```
+
+Currently just a placeholder test proving the runner is wired up correctly, locally and in CI - real component tests haven't been written yet.
+
 ## CI/CD
 
 `.github/workflows/ci-cd.yml` runs on every push/PR:
 
-1. **Checks** — `cargo fmt` + `clippy` + `build` + `test` for `backend` and `worker`, `svelte-check` + `vite build` for `frontend`.
+1. **Checks** — `cargo fmt` + `clippy` + `build` + `test` for `backend` and `worker`, `svelte-check` + `vitest` + `vite build` for `frontend`.
 2. **Build & push** (push to `main` only) — builds `backend`, `worker`, `frontend`, `elasticmq` images and pushes them to GHCR, tagged with the commit SHA.
 3. **Deploy** (push to `main` only, skipped if deploy secrets aren't set) — copies `docker-compose.prod.yaml` to the target host over SSH and runs `docker compose pull && up -d`.
 

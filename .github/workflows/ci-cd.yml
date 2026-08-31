@@ -80,7 +80,7 @@ jobs:
         run: cargo test
 
   frontend-check:
-    name: Frontend (typecheck, build)
+    name: Frontend (typecheck, test, build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,6 +96,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - working-directory: frontend
         run: pnpm run check
+      - working-directory: frontend
+        run: pnpm run test
       - working-directory: frontend
         run: pnpm run build
 
