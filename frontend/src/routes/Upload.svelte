@@ -2,6 +2,7 @@
   let { navigate }: { navigate: (to: string) => void } = $props();
 
   let file = $state<File | null>(null);
+  let title = $state('');
   let uploading = $state(false);
   let error = $state('');
 
@@ -11,7 +12,7 @@
   }
 
   async function upload() {
-    if (!file) return;
+    if (!file || !title.trim()) return;
     if (file.size > 1024 * 1024 * 1024) {
       error = 'File exceeds the 1GB limit';
       return;
@@ -20,6 +21,7 @@
     error = '';
 
     const formData = new FormData();
+    formData.append('title', title.trim());
     formData.append('video', file);
 
     try {
@@ -39,6 +41,15 @@
     <h1>Share a video</h1>
     <p class="subtitle">Upload a video and get a shareable link instantly.</p>
 
+    <input
+      class="title-input"
+      type="text"
+      placeholder="Give your video a title"
+      bind:value={title}
+      disabled={uploading}
+      maxlength="200"
+    />
+
     <label class="file-label" class:has-file={!!file}>
       <input
         type="file"
@@ -53,7 +64,7 @@
       {/if}
     </label>
 
-    <button class="primary" onclick={upload} disabled={!file || uploading}>
+    <button class="primary" onclick={upload} disabled={!file || !title.trim() || uploading}>
       {uploading ? 'Uploading...' : 'Upload'}
     </button>
 
@@ -95,6 +106,20 @@
   .subtitle {
     color: var(--text-muted);
     font-size: 1rem;
+  }
+
+  .title-input {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    color: var(--text);
+    background: var(--bg-subtle);
+  }
+
+  .title-input:focus {
+    outline: none;
+    border-color: var(--blue);
   }
 
   .file-label {

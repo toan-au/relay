@@ -9,6 +9,7 @@
   let videoEl = $state<HTMLVideoElement>(null!);
   let toastVisible = $state(false);
   let viewCount = $state<number | null>(null);
+  let title = $state('');
 
   let shareUrl = $derived(`${window.location.origin}/video/${token}`);
   let hls: Hls | null = null;
@@ -51,6 +52,8 @@
     const data = await res.json();
     status = data.status;
     viewCount = data.view_count;
+    title = data.title;
+    document.title = title ? `${title} - Relay` : 'Relay';
     return true;
   }
 
@@ -96,6 +99,10 @@
 </script>
 
 <div class="page">
+  {#if title && !notFound}
+    <h1 class="video-title">{title}</h1>
+  {/if}
+
   {#if notFound}
     <div class="processing-card">
       <p>Video not found.</p>
@@ -150,6 +157,17 @@
     gap: 1.5rem;
     padding: 2rem;
     background: var(--bg-subtle);
+  }
+
+  .video-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+    width: 100%;
+    max-width: 1100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .player-wrapper {
