@@ -2,14 +2,17 @@
 pub struct VideoRow {
     pub status: String,
     pub view_count: i64,
+    pub title: String,
 }
 
 impl VideoRow {
     pub async fn fetch_by_token(db: &sqlx::PgPool, share_token: &str) -> Result<Self, sqlx::Error> {
-        sqlx::query_as::<_, Self>("SELECT status, view_count FROM videos WHERE share_token = $1")
-            .bind(share_token)
-            .fetch_one(db)
-            .await
+        sqlx::query_as::<_, Self>(
+            "SELECT status, view_count, title FROM videos WHERE share_token = $1",
+        )
+        .bind(share_token)
+        .fetch_one(db)
+        .await
     }
 
     /// Atomically increments the view count and returns the new value.
@@ -30,11 +33,13 @@ impl VideoRow {
         db: &sqlx::PgPool,
         id: uuid::Uuid,
         share_token: &str,
+        title: &str,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO videos (id, share_token, status) VALUES ($1, $2, $3)")
+        sqlx::query("INSERT INTO videos (id, share_token, status, title) VALUES ($1, $2, $3, $4)")
             .bind(id)
             .bind(share_token)
             .bind("uploading")
+            .bind(title)
             .execute(db)
             .await?;
         Ok(())

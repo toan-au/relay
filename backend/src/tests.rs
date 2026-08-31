@@ -46,9 +46,25 @@ async fn test_state() -> AppState {
     }
 }
 
+/// A multipart body with a video field but no title - used to test
+/// that a missing title is rejected.
 fn multipart_video_body(boundary: &str) -> String {
     format!(
         "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"video\"; filename=\"clip.mp4\"\r\n\
+         Content-Type: video/mp4\r\n\r\n\
+         not-really-a-video\r\n\
+         --{boundary}--\r\n"
+    )
+}
+
+/// A valid multipart body: title + video.
+fn multipart_video_with_title_body(boundary: &str, title: &str) -> String {
+    format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"title\"\r\n\r\n\
+         {title}\r\n\
+         --{boundary}\r\n\
          Content-Disposition: form-data; name=\"video\"; filename=\"clip.mp4\"\r\n\
          Content-Type: video/mp4\r\n\r\n\
          not-really-a-video\r\n\
@@ -100,7 +116,10 @@ async fn upload(app: &Router) -> String {
             "content-type",
             format!("multipart/form-data; boundary={boundary}"),
         )
-        .body(Body::from(multipart_video_body(boundary)))
+        .body(Body::from(multipart_video_with_title_body(
+            boundary,
+            "Test video",
+        )))
         .unwrap();
 
     let res = app.clone().oneshot(req).await.unwrap();
@@ -110,6 +129,64 @@ async fn upload(app: &Router) -> String {
     let share_token = String::from_utf8(body.to_vec()).unwrap();
     assert_eq!(share_token.len(), 8);
     share_token
+}
+
+#[tokio::test]
+async fn uploaded_title_is_returned_by_status_endpoint() {
+    let app = routes::router(test_state().await);
+
+    let boundary = "HotPotatoTestBoundary";
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/videos")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(multipart_video_with_title_body(
+            boundary,
+            "My cool video",
+        )))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let share_token = String::from_utf8(body.to_vec()).unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/videos/{share_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["title"].as_str().unwrap(), "My cool video");
+}
+
+#[tokio::test]
+async fn upload_without_title_is_rejected() {
+    let app = routes::router(test_state().await);
+
+    let boundary = "HotPotatoTestBoundary";
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/videos")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(multipart_video_body(boundary)))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -144,6 +221,25 @@ async fn upload_reaches_processing() {
     }
 
     assert_eq!(status, "processing");
+}
+
+#[tokio::test]
+async fn upload_with_blank_title_is_rejected() {
+    let app = routes::router(test_state().await);
+
+    let boundary = "HotPotatoTestBoundary";
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/videos")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(multipart_video_with_title_body(boundary, "   ")))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

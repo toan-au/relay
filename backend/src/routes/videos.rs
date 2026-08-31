@@ -26,61 +26,76 @@ pub async fn upload_video(
         }
     }
 
+    let mut title: Option<String> = None;
+    let mut video: Option<(String, Vec<u8>)> = None;
+
     while let Some(mut field) = multipart.next_field().await.map_err(AppError::internal)? {
-        if field.name() != Some("video") {
-            continue;
-        }
-
-        let content_type = field.content_type().unwrap_or("").to_owned();
-        let extension = match content_type.as_str() {
-            "video/mp4" => "mp4",
-            "video/quicktime" => "mov",
-            "video/x-msvideo" => "avi",
-            "video/webm" => "webm",
-            "video/x-matroska" => "mkv",
-            _ => {
-                return Err(AppError::BadRequest(format!(
-                    "Unsupported video format: {}",
-                    content_type
-                )))
+        match field.name() {
+            Some("title") => {
+                let text = field.text().await.map_err(AppError::internal)?;
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    title = Some(trimmed.to_string());
+                }
             }
-        };
+            Some("video") => {
+                let content_type = field.content_type().unwrap_or("").to_owned();
+                let extension = match content_type.as_str() {
+                    "video/mp4" => "mp4",
+                    "video/quicktime" => "mov",
+                    "video/x-msvideo" => "avi",
+                    "video/webm" => "webm",
+                    "video/x-matroska" => "mkv",
+                    _ => {
+                        return Err(AppError::BadRequest(format!(
+                            "Unsupported video format: {}",
+                            content_type
+                        )))
+                    }
+                };
 
-        debug!(
-            "upload field: {:?} {:?}",
-            field.file_name(),
-            field.content_type()
-        );
+                debug!(
+                    "upload field: {:?} {:?}",
+                    field.file_name(),
+                    field.content_type()
+                );
 
-        let mut buffer: Vec<u8> = Vec::new();
-        while let Some(chunk) = field.chunk().await.map_err(AppError::internal)? {
-            buffer.extend_from_slice(&chunk);
-        }
+                let mut buffer: Vec<u8> = Vec::new();
+                while let Some(chunk) = field.chunk().await.map_err(AppError::internal)? {
+                    buffer.extend_from_slice(&chunk);
+                }
 
-        let video_id = uuid::Uuid::new_v4();
-        let share_token = uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string();
-        let s3_key = format!("raw/{}/input.{}", share_token, extension);
-
-        VideoRow::insert(&state.db, video_id, &share_token).await?;
-        info!("video inserted: {}", share_token);
-
-        // Return immediately — S3 upload and SQS enqueue happen in the background
-        let state = state.clone();
-        let token = share_token.clone();
-        tokio::spawn(async move {
-            let failed = upload_and_enqueue(state.clone(), token.clone(), s3_key, buffer)
-                .await
-                .map_err(|e| e.to_string());
-            if let Err(e) = failed {
-                tracing::error!("background upload failed for {}: {}", token, e);
-                let _ = VideoRow::update_status(&state.db, &token, "failed").await;
+                video = Some((extension.to_string(), buffer));
             }
-        });
-
-        return Ok(share_token.into_response());
+            _ => continue,
+        }
     }
 
-    Ok(axum::http::StatusCode::OK.into_response())
+    let title = title.ok_or_else(|| AppError::BadRequest("Title is required".into()))?;
+    let (extension, buffer) =
+        video.ok_or_else(|| AppError::BadRequest("Video file is required".into()))?;
+
+    let video_id = uuid::Uuid::new_v4();
+    let share_token = uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string();
+    let s3_key = format!("raw/{}/input.{}", share_token, extension);
+
+    VideoRow::insert(&state.db, video_id, &share_token, &title).await?;
+    info!("video inserted: {}", share_token);
+
+    // Return immediately — S3 upload and SQS enqueue happen in the background
+    let bg_state = state.clone();
+    let token = share_token.clone();
+    tokio::spawn(async move {
+        let failed = upload_and_enqueue(bg_state.clone(), token.clone(), s3_key, buffer)
+            .await
+            .map_err(|e| e.to_string());
+        if let Err(e) = failed {
+            tracing::error!("background upload failed for {}: {}", token, e);
+            let _ = VideoRow::update_status(&bg_state.db, &token, "failed").await;
+        }
+    });
+
+    Ok(share_token.into_response())
 }
 
 async fn upload_and_enqueue(
@@ -128,7 +143,8 @@ pub async fn get_video(
 
     Ok(axum::Json(serde_json::json!({
         "status": video.status,
-        "view_count": video.view_count
+        "view_count": video.view_count,
+        "title": video.title
     }))
     .into_response())
 }
