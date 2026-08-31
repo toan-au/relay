@@ -9,6 +9,8 @@ use crate::state::AppState;
 use crate::{queue, storage};
 
 async fn test_state() -> AppState {
+    dotenvy::dotenv().ok();
+
     let db = sqlx::PgPool::connect(
         &std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for tests"),
     )

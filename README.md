@@ -15,7 +15,7 @@ Anonymous video sharing. Upload a video, get a shareable link instantly.
 
 1. User uploads a video → backend streams it to S3 and returns a share token immediately
 2. Backend enqueues a transcoding job to SQS
-3. Worker picks up the job, transcodes to HLS with ffmpeg, uploads segments to S3, marks video as ready
+3. Worker picks up the job, transcodes to HLS with ffmpeg, uploads segments to S3, marks video as ready (or as errored, and cleans up, if transcoding fails)
 4. Viewer polls until ready, then streams via hls.js
 
 ## Getting started
@@ -34,7 +34,7 @@ Open `http://127.0.0.1`. not localhost
 
 ### Local development
 
-Requires: Rust, Node.js, ffmpeg
+Requires: Rust, Node.js, pnpm, ffmpeg
 
 Spin up just the infrastructure:
 
@@ -58,7 +58,7 @@ Then in separate terminals:
 ```bash
 cd backend  && cargo run
 cd worker   && cargo run
-cd frontend && npm install && npm run dev
+cd frontend && pnpm install && pnpm run dev
 ```
 
 ## Root Environment Variables
@@ -77,6 +77,19 @@ cd frontend && npm install && npm run dev
 | `SQS_QUEUE_URL`         | Full URL of the transcoding queue                              |
 | `SQS_ACCESS_KEY_ID`     | SQS access key (any value works locally, required for AWS SQS) |
 | `SQS_SECRET_ACCESS_KEY` | SQS secret key (any value works locally, required for AWS SQS) |
+
+## Testing
+
+```bash
+cd worker && cargo test    # pure unit tests, no infra needed
+```
+
+Backend tests hit a real Postgres/MinIO/ElasticMQ, so start the infra first (same as local dev):
+
+```bash
+docker compose up postgres minio elasticmq
+cd backend && cargo test
+```
 
 ## CI/CD
 
