@@ -83,13 +83,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
       - working-directory: frontend
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - working-directory: frontend
-        run: bun run check
+        run: pnpm run check
       - working-directory: frontend
-        run: bun run build
+        run: pnpm run build
 
   prepare:
     name: Compute image repo path

@@ -1,11 +1,13 @@
 FROM node:alpine AS builder
 
+RUN npm install -g pnpm@10.30.1
+
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 FROM nginx:alpine
 
